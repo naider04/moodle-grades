@@ -39,14 +39,24 @@ Abrir en el navegador: `http://localhost:3001`
 
 Esta aplicación requiere un **servidor Node.js** (no funciona en GitHub Pages ni en sitios estáticos).
 
-### Opciones recomendadas:
+### Vercel (recomendado)
 
-| Plataforma | Tipo | Notas |
-|-----------|------|-------|
-| Render | Web Service | Build: `npm install`, Start: `node server.js` |
-| Railway | Node.js app | Auto-detecta Node.js |
-| Fly.io | Docker / Node.js | Requiere `fly.toml` |
-| Cyclic.sh | Node.js | Despliegue desde GitHub |
+Conectar el repositorio de GitHub a Vercel. La configuración se detecta automáticamente desde `vercel.json`:
+
+| Configuración | Valor |
+|---------------|-------|
+| Framework | Other |
+| Build Command | `npm install` |
+| Output Directory | `public` |
+| Root Directory | `GradeInsight/` |
+
+### Local
+
+```bash
+npm install
+npm start
+# Abrir http://localhost:3001
+```
 
 ## Stack
 

@@ -317,6 +317,26 @@ async function loadHybridDetail(course, detailEl) {
         }
         const data = await api('/api/course-detail', body);
         wrap.innerHTML = buildHybridTable(course, data);
+
+        // Update collapsed badge with corrected total
+        if (data.correctedTotal !== null && data.correctedTotal !== undefined && data.correctedTotal > 0) {
+            course.finalGrade = data.correctedTotal;
+            const badge = detailEl.closest('.course-card').querySelector('.course-card-header .grade-badge, .course-card-header .grade-badge.grade-none');
+            if (badge) {
+                const gradeClass = course.status === 'REPROBADO' ? 'grade-fail' : 'grade-ok';
+                badge.outerHTML = '<span class="grade-badge ' + gradeClass + '">' + formatNum(data.correctedTotal) + ' <span class="max">/ 100</span></span>';
+            } else {
+                // No badge existed (was showing "En curso" or "Sin nota"), recreate it
+                const header = detailEl.closest('.course-card').querySelector('.course-card-header');
+                const expandIcon = header.querySelector('.course-expand-icon');
+                const newBadge = document.createElement('span');
+                newBadge.className = 'grade-badge grade-ok';
+                newBadge.innerHTML = formatNum(data.correctedTotal) + ' <span class="max">/ 100</span>';
+                header.insertBefore(newBadge, expandIcon);
+                const oldBadge = header.querySelector('.grade-badge.grade-none');
+                if (oldBadge && oldBadge !== newBadge) oldBadge.remove();
+            }
+        }
     } catch (err) {
         // Fallback to SGA-only
         wrap.innerHTML = buildSgaGradeTable(course, course.professor || '');
@@ -353,10 +373,34 @@ function buildHybridTable(course, detail) {
     for (const g of grades) gradeMap[g.name] = g.value;
 
     const hasRe = gradeMap['RE'] > 0;
-    const baseTotal = (gradeMap['P1'] || 0) + (gradeMap['P2'] || 0) + (gradeMap['EXT'] || 0);
-    const finalTotal = hasRe ? Math.ceil((baseTotal + gradeMap['RE']) / 2) : Math.round(baseTotal);
+    
+    // Use corrected total from server when available (includes Moodle EXAMEN_FINAL)
+    const finalTotal = detail.correctedTotal !== null && detail.correctedTotal !== undefined
+        ? detail.correctedTotal
+        : (() => {
+            const base = (gradeMap['P1'] || 0) + (gradeMap['P2'] || 0) + (gradeMap['EXT'] || 0);
+            return hasRe ? Math.ceil((base + (gradeMap['RE'] || 0)) / 2) : Math.round(base);
+        })();
+
+    // Check if SGA has any real data (at least one non-zero grade)
+    const hasSgaData = grades.some(g => g.value > 0);
 
     let html = '';
+
+    if (!hasSgaData && moodle) {
+        // SGA has no useful data, show only Moodle section
+        html += '<div style="margin-bottom:0.5rem;">';
+        html += '<p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem;">Notas del aula virtual (Moodle):</p>';
+        html += buildMoodleActivitiesTable(moodle);
+        html += '</div>';
+        if (finalTotal > 0) {
+            html += '<div style="padding:0.5rem 0.75rem;background:#f0f4f8;border-radius:4px;font-size:0.85rem;display:flex;justify-content:space-between;align-items:center;">';
+            html += '<strong>Nota estimada del curso</strong>';
+            html += '<span style="font-weight:700;font-size:1rem;">' + formatNum(finalTotal) + ' / 100</span>';
+            html += '</div>';
+        }
+        return html;
+    }
 
     // ─── SGA Category Table ───
     html += '<table class="grade-table sga-table">';
@@ -453,7 +497,7 @@ function buildHybridTable(course, detail) {
     // ─── Moodle Individual Activities (if available) ───
     if (moodle && (moodle.categories.length > 0 || moodle.extraItems.length > 0)) {
         html += '<div style="margin-top:1.2rem;border-top:2px solid var(--border-table);padding-top:1rem;">';
-        html += '<h4 style="font-size:0.85rem;color:var(--navy);margin-bottom:0.75rem;font-family:var(--font-serif);">Detalle de actividades individuales</h4>';
+        html += '<h4 style="font-size:0.85rem;color:var(--navy);margin-bottom:0.75rem;font-family:var(--font-serif);">Detalle de actividades en Moodle</h4>';
 
         if (moodle.categories.length > 0) {
             html += '<table class="grade-table moodle-detail-table">';
@@ -631,6 +675,79 @@ function buildSgaGradeTable(course, teacherName) {
     html += 'P1 = N1 + N2 + EXP1 (m\u00e1x 35) | P2 = N3 + N4 + EXP2 (m\u00e1x 35) | EXT = Examen final (m\u00e1x 30)';
     if (hasRe) html += ' | RE = Recuperaci\u00f3n';
     html += '</div>';
+
+    return html;
+}
+
+// ─── Build Moodle activities table (used inside hybrid view) ───
+function buildMoodleActivitiesTable(moodle) {
+    let html = '';
+    if (moodle.categories.length > 0) {
+        html += '<table class="grade-table moodle-detail-table">';
+        html += '<thead><tr>' +
+            '<th class="col-name">Actividad</th>' +
+            '<th class="col-score">Nota</th>' +
+            '<th class="col-max">Máx</th>' +
+            '<th class="col-pct">Rendimiento</th>' +
+            '<th class="col-contrib">Aporte</th>' +
+            '</tr></thead><tbody>';
+
+        for (const cat of moodle.categories) {
+            const catPct = (cat.raw !== null && cat.max) ? Math.round(cat.raw / cat.max * 1000) / 10 : null;
+            if (cat.items.length > 0) {
+                html += '<tr class="cat-header">' +
+                    '<td><span class="cat-label">' + escapeHtml(cat.name || 'General') + '</span> <span class="cat-max">(máx ' + formatNum(cat.max) + ')</span></td>' +
+                    '<td class="col-score cat-total">' + formatNum(cat.raw) + '</td>' +
+                    '<td class="col-max">' + formatNum(cat.max) + '</td>' +
+                    '<td class="col-pct">' + (catPct !== null ? catPct + '%' : '&mdash;') + '</td>' +
+                    '<td class="col-contrib">' + formatNum(cat.raw) + ' / ' + formatNum(cat.max) + '</td>' +
+                    '</tr>';
+
+                for (const item of cat.items) {
+                    const badgeClass = item.module === 'quiz' ? 'quiz' : 'assign';
+                    const badgeLabel = item.module === 'quiz' ? 'Quiz' : 'Tarea';
+                    const rawVal = item.raw;
+                    const maxVal = item.max;
+                    const itemPct = (rawVal !== null && maxVal) ? Math.round(rawVal / maxVal * 1000) / 10 : null;
+                    html += '<tr class="activity-row">' +
+                        '<td class="col-name">' +
+                            '<span class="mod-badge ' + badgeClass + '">' + badgeLabel + '</span> ' +
+                            escapeHtml(item.name) +
+                        '</td>' +
+                        '<td class="col-score">' + (rawVal !== null ? formatNum(rawVal) : item.score) + '</td>' +
+                        '<td class="col-max">' + (maxVal !== null ? formatNum(maxVal) : '&mdash;') + '</td>' +
+                        '<td class="col-pct">' +
+                            (itemPct !== null
+                                ? '<span class="pct-bar">' +
+                                    '<span class="pct-bar-fill"><span class="fill" style="width:' + Math.min(itemPct, 100) + '%"></span></span>' +
+                                    '<span class="pct-text">' + itemPct + '%</span>' +
+                                '</span>'
+                                : '&mdash;') +
+                        '</td>' +
+                        '<td class="col-contrib">' + (rawVal !== null ? formatNum(rawVal) + ' / ' + formatNum(maxVal) : '&mdash;') + '</td>' +
+                        '</tr>';
+                }
+            }
+        }
+
+        html += '</tbody></table>';
+    }
+
+    // Extra items (EXAMEN_FINAL, EXAMEN_RECUPERACION)
+    if (moodle.extraItems && moodle.extraItems.length > 0) {
+        for (const item of moodle.extraItems) {
+            const rawVal = item.raw;
+            const maxVal = item.max;
+            const itemPct = (rawVal !== null && maxVal) ? Math.round(rawVal / maxVal * 1000) / 10 : null;
+            if (rawVal !== null && rawVal > 0) {
+                html += '<div style="margin-top:0.5rem;padding:0.6rem 0.75rem;background:#f0f4f8;border-radius:4px;font-size:0.82rem;display:flex;justify-content:space-between;align-items:center;">' +
+                    '<span><strong>' + escapeHtml(item.name) + '</strong></span>' +
+                    '<span>' + formatNum(rawVal) + ' / ' + formatNum(maxVal) +
+                    (itemPct !== null ? ' (' + itemPct + '%)' : '') + '</span>' +
+                    '</div>';
+            }
+        }
+    }
 
     return html;
 }

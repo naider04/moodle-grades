@@ -179,7 +179,7 @@ app.post('/api/sga-courses', async (req, res) => {
         }
 
         // Build course list
-        const result = courses.map(c => {
+        const result = await Promise.all(courses.map(async (c) => {
             const gradeItems = (c.evaluaciong || []).map(g => ({
                 name: g.detallemodeloevaluativo.nombre,
                 value: parseFloat(g.valor) || 0,
@@ -201,7 +201,6 @@ app.post('/api/sga-courses', async (req, res) => {
             for (const mc of moodleCourses) {
                 const mcName = (mc.fullname || mc.shortname || '').toLowerCase().replace(/&amp;/g, '&');
                 const sgaName = (shortName || fullname).toLowerCase().replace(/&amp;/g, '&');
-                // Match if the SGA short name is contained in the Moodle course name
                 if (sgaName.length > 5 && mcName.includes(sgaName.substring(0, 25))) {
                     moodleCourseId = mc.id;
                     moodleCourseName = mc.fullname || mc.shortname || '';
@@ -209,12 +208,81 @@ app.post('/api/sga-courses', async (req, res) => {
                 }
             }
 
+            // ─── Calculate grade from SGA components with optional Moodle supplement ───
+            let compP1 = computeGroupSum(gradeItems, ['N1', 'N2', 'EXP1']);
+            let compP2 = computeGroupSum(gradeItems, ['N3', 'N4', 'EXP2']);
+            let compExt = computeGroupSum(gradeItems, ['EXT']);
+            let compRe = computeGroupSum(gradeItems, ['RE']);
+
+            // Try Moodle to supplement missing SGA components
+            if (moodleCourseId && moodleToken && moodleUrl && moodleUserId) {
+                try {
+                    const gi = await moodleWs(moodleUrl, moodleToken, 'gradereport_user_get_grade_items', {
+                        courseid: moodleCourseId, userid: moodleUserId,
+                    });
+                    const ug = gi.usergrades && gi.usergrades[0];
+                    if (ug) {
+                        // Find EXAMEN_FINAL and RECUPERACION in Moodle grade items
+                        const examItem = ug.gradeitems.find(i =>
+                            i.itemname && (i.itemname.includes('EXAMEN_FINAL') || i.itemname === 'EXT')
+                        );
+                        const recuperacionItem = ug.gradeitems.find(i =>
+                            i.itemname && (i.itemname.includes('RECUPERACION') || i.itemname === 'RE')
+                        );
+
+                        // Replace EXT if SGA has none (0 or null)
+                        if ((compExt === null || compExt === 0) &&
+                            examItem && examItem.graderaw !== null && examItem.graderaw !== undefined) {
+                            compExt = parseFloat(examItem.graderaw);
+                        }
+                        // Replace RE if SGA has none
+                        if ((compRe === null || compRe === 0) &&
+                            recuperacionItem && recuperacionItem.graderaw !== null && recuperacionItem.graderaw !== undefined) {
+                            compRe = parseFloat(recuperacionItem.graderaw);
+                        }
+
+                        // If SGA has no P1/P2 at all, use Moodle category raw sums
+                        if ((compP1 === null || compP1 === 0) && (compP2 === null || compP2 === 0)) {
+                            const catItems = ug.gradeitems.filter(i => i.itemtype === 'category');
+                            if (catItems.length >= 6) {
+                                const catRaws = catItems.map(cat =>
+                                    (cat.graderaw !== null && cat.graderaw !== undefined)
+                                        ? parseFloat(cat.graderaw) : null
+                                );
+                                // First 3 categories = N1+N2+EXP1 → P1
+                                if (catRaws[0] !== null && catRaws[1] !== null && catRaws[2] !== null) {
+                                    compP1 = Math.round((catRaws[0] + catRaws[1] + catRaws[2]) * 100) / 100;
+                                }
+                                // Next 3 = N3+N4+EXP2 → P2
+                                if (catRaws[3] !== null && catRaws[4] !== null && catRaws[5] !== null) {
+                                    compP2 = Math.round((catRaws[3] + catRaws[4] + catRaws[5]) * 100) / 100;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { /* optional correction */ }
+            }
+
+            // Always calculate final grade from components with RE formula
+            const p1 = compP1 || 0;
+            const p2 = compP2 || 0;
+            const ext = compExt || 0;
+            const re = compRe || 0;
+            const gradeBase = p1 + p2 + ext;
+            let calculatedGrade = re > 0
+                ? Math.ceil((gradeBase + re) / 2)
+                : Math.round(gradeBase);
+
+            // Fall back to SGA's notafinal only when our calculation yields 0
+            const sgaFinal = c.notafinal !== null && c.notafinal !== undefined ? Math.round(c.notafinal) : null;
+            const finalGrade = calculatedGrade > 0 ? calculatedGrade : (sgaFinal > 0 ? sgaFinal : null);
+
             return {
                 id: c.materia && c.materia.id || '',
                 fullname,
                 shortname: shortName,
                 professor,
-                finalGrade: c.notafinal !== null && c.notafinal !== undefined ? Math.round(c.notafinal) : null,
+                finalGrade,
                 attendance: {
                     percentage: c.asistenciafinal,
                     real: c.asistencia_real,
@@ -224,15 +292,14 @@ app.post('/api/sga-courses', async (req, res) => {
                 statusId: c.estado && c.estado.idm || 0,
                 dateRange: c.fecha_mostrar || '',
                 grades: gradeItems,
-                p1: computeGroupSum(gradeItems, ['N1', 'N2', 'EXP1']),
-                p2: computeGroupSum(gradeItems, ['N3', 'N4', 'EXP2']),
-                ext: computeGroupSum(gradeItems, ['EXT']),
-                re: computeGroupSum(gradeItems, ['RE']),
-                // Moodle course reference (optional)
+                p1: compP1,
+                p2: compP2,
+                ext: compExt,
+                re: compRe,
                 moodleCourseId,
                 moodleCourseName,
             };
-        });
+        }));
 
         res.json({ courses: result, matricula, malla });
     } catch (err) {
@@ -333,7 +400,44 @@ app.post('/api/course-detail', async (req, res) => {
         } catch (e) { /* moodle detail is optional */ }
     }
 
-    res.json({ sga: sgaDetail, moodle: moodleDetail });
+    // Calculate corrected total using Moodle's EXAMEN_FINAL when SGA EXT is 0
+    let correctedTotal = null;
+    if (sgaDetail.ext === null || sgaDetail.ext === 0) {
+        let moodleExt = 0;
+        if (moodleDetail && moodleDetail.extraItems) {
+            for (const item of moodleDetail.extraItems) {
+                if (item.name.includes('EXAMEN_FINAL') && item.raw !== null) {
+                    moodleExt = item.raw;
+                    break;
+                }
+            }
+        }
+        // Also check categories for EXAMEN_FINAL
+        if (moodleExt === 0 && moodleDetail && moodleDetail.categories) {
+            for (const cat of moodleDetail.categories) {
+                for (const item of cat.items) {
+                    if (item.name.includes('EXAMEN_FINAL') && item.raw !== null) {
+                        moodleExt = item.raw;
+                        break;
+                    }
+                }
+                if (moodleExt > 0) break;
+            }
+        }
+        if (moodleExt > 0) {
+            const p1 = sgaDetail.p1 || 0;
+            const p2 = sgaDetail.p2 || 0;
+            const re = sgaDetail.re || 0;
+            const base = p1 + p2 + moodleExt;
+            correctedTotal = re > 0 ? Math.ceil((base + re) / 2) : Math.round(base);
+        }
+    }
+    if (correctedTotal === null && sgaDetail.p1 !== null && sgaDetail.p2 !== null) {
+        const base = (sgaDetail.p1 || 0) + (sgaDetail.p2 || 0) + (sgaDetail.ext || 0);
+        correctedTotal = (sgaDetail.re || 0) > 0 ? Math.ceil((base + (sgaDetail.re || 0)) / 2) : Math.round(base);
+    }
+
+    res.json({ sga: sgaDetail, moodle: moodleDetail, correctedTotal });
 });
 
 // ─── Moodle Login (for "otra" mode) ───
