@@ -1,0 +1,13 @@
+{
+  "name": "grade-insight",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Academic grade analyzer for UNEMI Moodle",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "node-fetch": "^2.7.0"
+  }
+}
