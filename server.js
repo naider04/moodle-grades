@@ -140,9 +140,10 @@ app.post('/api/grade-detail', async (req, res) => {
         const ug = gi.usergrades && gi.usergrades[0];
         if (!ug) return res.status(404).json({ error: 'No hay calificaciones.' });
 
-        // Max grade maps
+        // Max grade maps — use quiz.grade (not sumgrades) as authoritative max
+        // sumgrades can be 0 for exams while grade holds the correct max
         const quizMax = {};
-        for (const q of (quizData.quizzes || [])) quizMax[q.id] = q.sumgrades;
+        for (const q of (quizData.quizzes || [])) quizMax[q.id] = q.grade || q.sumgrades;
         const assignMax = {};
         for (const c of (assignData.courses || []))
             for (const a of (c.assignments || [])) assignMax[a.cmid] = a.grade;
@@ -190,6 +191,10 @@ app.post('/api/grade-detail', async (req, res) => {
             const children = modItems.filter(m => m.categoryid === cat.iteminstance);
             if (children.length === 0) continue;
 
+            const catName = categoryNames[catIndex] || `C${catIndex + 1}`;
+            // Skip 'RE' (Recuperación) in total — it's not part of the regular grade
+            const isRecovery = catName === 'RE';
+
             let catMaxSum = 0, catCount = 0;
             const items = [];
             for (const ch of children) {
@@ -197,7 +202,6 @@ app.post('/api/grade-detail', async (req, res) => {
                 if (ch.itemmodule === 'quiz') maxGrade = quizMax[ch.iteminstance];
                 else if (ch.itemmodule === 'assign') maxGrade = assignMax[ch.cmid];
 
-                // Only count items with a valid max > 0
                 if (maxGrade !== null && maxGrade !== undefined && maxGrade > 0) {
                     catMaxSum += maxGrade;
                     catCount++;
@@ -211,7 +215,7 @@ app.post('/api/grade-detail', async (req, res) => {
                     name: ch.itemname,
                     module: ch.itemmodule,
                     score: ch.gradeformatted || '-',
-                    raw: raw,
+                    raw,
                     max: maxGrade,
                     percentage: pct !== null ? Math.round(pct * 10) / 10 : null,
                 });
@@ -221,54 +225,110 @@ app.post('/api/grade-detail', async (req, res) => {
 
             const catAvgMax = catMaxSum / catCount;
             if (catAvgMax <= 0) continue;
-            totalMax += catAvgMax;
+
+            if (!isRecovery) totalMax += catAvgMax;
             const catRaw = cat.graderaw !== null ? parseFloat(cat.graderaw) : null;
 
-            // Item contributions (only for items with valid max > 0)
             for (const item of items) {
-                if (item.raw !== null && item.max !== null && item.max > 0) {
+                if (item.raw !== null && item.max !== null && item.max > 0 && !isRecovery) {
                     const weightInCat = 1 / catCount;
                     item.pointsToFinal = Math.round((item.raw / item.max) * weightInCat * catAvgMax * 100) / 100;
                     item.maxPointsToFinal = Math.round(weightInCat * catAvgMax * 100) / 100;
                 } else {
                     item.pointsToFinal = null;
-                    item.maxPointsToFinal = catCount > 0 && catAvgMax > 0
+                    item.maxPointsToFinal = (!isRecovery && catCount > 0 && catAvgMax > 0)
                         ? Math.round((1 / catCount) * catAvgMax * 100) / 100
                         : null;
                 }
             }
 
             categories.push({
-                name: categoryNames[catIndex] || `C${catIndex + 1}`,
+                name: catName,
                 score: cat.gradeformatted || '-',
                 raw: catRaw,
                 max: Math.round(catAvgMax * 100) / 100,
                 items,
+                isRecovery,
             });
             catIndex++;
         }
 
+        const courseName = ug.coursefullname || '';
         const courseTotalRaw = (courseItem && courseItem.graderaw !== null && courseItem.graderaw !== undefined)
             ? parseFloat(courseItem.graderaw) : null;
         const courseTotalFormatted = courseItem ? courseItem.gradeformatted : '-';
-        const courseName = ug.coursefullname || '';
 
-        // Compute total from categories when course-level total is not set
-        let computedRaw = 0;
-        let computedMax = 0;
-        let anyCatHasRaw = false;
+        // ─── SGA formula for final grade ───
+        // P1 = N1 + N2 + EXP1 (max 35)
+        // P2 = N3 + N4 + EXP2 + EXT (max 65)
+        // Total = P1 + P2 (max 100)
+        // If RE > 0: Total = ceil((P1 + P2 + RE) / 2)
+        //
+        // For categories where graderaw is null but children have grades,
+        // compute the effective category score from its items.
+
+        let p1Raw = 0, p2Raw = 0, reRaw = 0;
+        let p1HasAll = true, p2HasAll = true;
+
         for (const cat of categories) {
-            computedMax += cat.max;
-            if (cat.raw !== null) {
-                computedRaw += cat.raw;
-                anyCatHasRaw = true;
+            // Determine effective raw for this category
+            let catRaw = cat.raw;
+            if (catRaw === null) {
+                // Compute from children when category-level grade is missing
+                let sum = 0, count = 0;
+                for (const item of cat.items) {
+                    if (item.raw !== null && item.max !== null && item.max > 0) {
+                        sum += (item.raw / item.max);
+                        count++;
+                    }
+                }
+                if (count > 0) {
+                    catRaw = (sum / count) * cat.max;
+                }
+            }
+
+            if (cat.isRecovery) {
+                reRaw = catRaw || 0;
+                continue;
+            }
+
+            // Classify into P1 or P2 based on name
+            const isP1 = cat.name === 'N1' || cat.name === 'N2' || cat.name === 'EXP1';
+            if (isP1) {
+                if (catRaw !== null) p1Raw += catRaw;
+                else p1HasAll = false;
+            } else {
+                if (catRaw !== null) p2Raw += catRaw;
+                else p2HasAll = false;
             }
         }
-        // If course total is not set but categories have grades, use computed
-        const useComputed = (courseTotalRaw === null || courseTotalRaw === undefined) && anyCatHasRaw;
-        const finalRaw = useComputed ? Math.round(computedRaw * 100) / 100 : courseTotalRaw;
-        const finalFormatted = useComputed ? computedRaw.toFixed(2).replace('.', ',') : courseTotalFormatted;
-        const finalMax = useComputed ? Math.round(computedMax * 100) / 100 : Math.round(totalMax * 100) / 100;
+
+        // Compute final grade using SGA formula
+        let sgaTotal = null;
+        if (p1HasAll && p2HasAll) {
+            const baseTotal = p1Raw + p2Raw;
+            if (reRaw > 0) {
+                // Recovery: (P1 + P2 + RE) / 2, rounded up
+                sgaTotal = Math.ceil((baseTotal + reRaw) / 2);
+            } else {
+                // SGA shows integer grades, round to nearest
+                sgaTotal = Math.round(baseTotal);
+            }
+        }
+
+        // Also compute simple sum for display comparison
+        let simpleSum = 0, simpleMax = 0;
+        for (const cat of categories) {
+            if (cat.isRecovery) continue;
+            simpleMax += cat.max;
+            if (cat.raw !== null) simpleSum += cat.raw;
+        }
+
+        const finalRaw = sgaTotal !== null ? sgaTotal : null;
+        const finalFormatted = sgaTotal !== null
+            ? String(sgaTotal)
+            : (courseItem ? courseItem.gradeformatted : '-');
+        const finalMax = 100;
 
         res.json({
             courseName,
@@ -276,6 +336,8 @@ app.post('/api/grade-detail', async (req, res) => {
                 formatted: finalFormatted,
                 raw: finalRaw,
                 max: finalMax,
+                sgaTotal,
+                simpleSum: Math.round(simpleSum * 100) / 100,
             },
             categories,
         });
