@@ -29,6 +29,11 @@
                         <span class="mode-title">Estudiante en l&iacute;nea</span>
                         <span class="mode-desc">Acceder al aula virtual</span>
                     </button>
+                    <button class="mode-btn" data-mode="otra">
+                        <span class="mode-icon">&#x2699;</span>
+                        <span class="mode-title">Otra instituci&oacute;n</span>
+                        <span class="mode-desc">Ingresar URL personalizada</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -42,6 +47,10 @@
                 </div>
                 <p id="login-mode-label" class="login-mode-label"></p>
                 <form id="login-form">
+                    <div class="field hidden" id="field-moodle-url">
+                        <label for="moodle-url-input">URL del aula</label>
+                        <input type="url" id="moodle-url-input" placeholder="https://moodle.institucion.edu.ec" autocomplete="url" />
+                    </div>
                     <div class="field">
                         <label for="username">Usuario</label>
                         <input type="text" id="username" placeholder="tu_usuario" required autocomplete="username" />

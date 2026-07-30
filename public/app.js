@@ -13,11 +13,13 @@ const state = {
 const MOODLE_URLS = {
     aulagradoa: 'https://aulagradoa.unemi.edu.ec',
     aulagradob: 'https://aulagradob.unemi.edu.ec',
+    otra: '', // will be filled by user
 };
 
 const MODE_LABELS = {
     aulagradoa: 'Estudiante presencial',
-    aulagradob: 'Estudiante en l\u00ednea',
+    aulagradob: 'Estudiante en línea',
+    otra: 'Otra institución',
 };
 
 // ─── DOM refs ───
@@ -33,6 +35,8 @@ const loginError = $('login-error');
 const loginBackBtn = $('login-back-btn');
 const usernameInput = $('username');
 const passwordInput = $('password');
+const moodleUrlField = $('field-moodle-url');
+const moodleUrlInput = $('moodle-url-input');
 const headerUser = $('header-user');
 const headerCareer = $('header-career');
 const logoutBtn = $('logout-btn');
@@ -73,12 +77,25 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
         state.mode = btn.dataset.mode;
         const label = MODE_LABELS[state.mode] || state.mode;
         loginModeLabel.textContent = label;
+        // Show URL field only for "otra" mode
+        moodleUrlField.classList.toggle('hidden', state.mode !== 'otra');
+        if (state.mode === 'otra') {
+            moodleUrlInput.required = true;
+        } else {
+            moodleUrlInput.required = false;
+            moodleUrlInput.value = '';
+        }
         showScreen(screenLogin);
-        usernameInput.focus();
+        if (state.mode === 'otra') {
+            moodleUrlInput.focus();
+        } else {
+            usernameInput.focus();
+        }
     });
 });
 
 loginBackBtn.addEventListener('click', () => {
+    moodleUrlField.classList.add('hidden');
     showScreen(screenMode);
 });
 
@@ -91,7 +108,9 @@ loginForm.addEventListener('submit', async (e) => {
 
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
-    const moodleUrl = MOODLE_URLS[state.mode];
+    const moodleUrl = state.mode === 'otra'
+        ? moodleUrlInput.value.trim().replace(/\/+$/, '')
+        : MOODLE_URLS[state.mode];
 
     if (!moodleUrl) {
         showError(loginError, 'Modalidad no v\u00e1lida.');
@@ -133,6 +152,8 @@ logoutBtn.addEventListener('click', () => {
     showScreen(screenMode);
     usernameInput.value = '';
     passwordInput.value = '';
+    moodleUrlInput.value = '';
+    moodleUrlField.classList.add('hidden');
 });
 
 // ─── Load courses ───

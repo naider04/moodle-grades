@@ -248,16 +248,34 @@ app.post('/api/grade-detail', async (req, res) => {
             catIndex++;
         }
 
-        const courseTotalRaw = courseItem ? parseFloat(courseItem.graderaw) : null;
+        const courseTotalRaw = (courseItem && courseItem.graderaw !== null && courseItem.graderaw !== undefined)
+            ? parseFloat(courseItem.graderaw) : null;
         const courseTotalFormatted = courseItem ? courseItem.gradeformatted : '-';
         const courseName = ug.coursefullname || '';
+
+        // Compute total from categories when course-level total is not set
+        let computedRaw = 0;
+        let computedMax = 0;
+        let anyCatHasRaw = false;
+        for (const cat of categories) {
+            computedMax += cat.max;
+            if (cat.raw !== null) {
+                computedRaw += cat.raw;
+                anyCatHasRaw = true;
+            }
+        }
+        // If course total is not set but categories have grades, use computed
+        const useComputed = (courseTotalRaw === null || courseTotalRaw === undefined) && anyCatHasRaw;
+        const finalRaw = useComputed ? Math.round(computedRaw * 100) / 100 : courseTotalRaw;
+        const finalFormatted = useComputed ? computedRaw.toFixed(2).replace('.', ',') : courseTotalFormatted;
+        const finalMax = useComputed ? Math.round(computedMax * 100) / 100 : Math.round(totalMax * 100) / 100;
 
         res.json({
             courseName,
             courseTotal: {
-                formatted: courseTotalFormatted,
-                raw: courseTotalRaw,
-                max: Math.round(totalMax * 100) / 100,
+                formatted: finalFormatted,
+                raw: finalRaw,
+                max: finalMax,
             },
             categories,
         });
