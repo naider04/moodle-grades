@@ -400,42 +400,63 @@ app.post('/api/course-detail', async (req, res) => {
         } catch (e) { /* moodle detail is optional */ }
     }
 
-    // Calculate corrected total using Moodle's EXAMEN_FINAL when SGA EXT is 0
-    let correctedTotal = null;
-    if (sgaDetail.ext === null || sgaDetail.ext === 0) {
-        let moodleExt = 0;
-        if (moodleDetail && moodleDetail.extraItems) {
+    // ─── Calculate corrected total from SGA + Moodle components (mirrors sga-courses logic) ───
+    let p1 = sgaDetail.p1 || 0;
+    let p2 = sgaDetail.p2 || 0;
+    let ext = sgaDetail.ext || 0;
+    let re = sgaDetail.re || 0;
+
+    // Use Moodle category sums for P1/P2 when SGA has none
+    if ((p1 === 0 || p2 === 0) && moodleDetail && moodleDetail.categories && moodleDetail.categories.length >= 6) {
+        const cats = moodleDetail.categories;
+        if (p1 === 0 && cats[0].raw !== null && cats[1].raw !== null && cats[2].raw !== null) {
+            p1 = Math.round((cats[0].raw + cats[1].raw + cats[2].raw) * 100) / 100;
+        }
+        if (p2 === 0 && cats[3].raw !== null && cats[4].raw !== null && cats[5].raw !== null) {
+            p2 = Math.round((cats[3].raw + cats[4].raw + cats[5].raw) * 100) / 100;
+        }
+    }
+
+    // Use Moodle EXAMEN_FINAL when SGA EXT is 0
+    if (ext === 0 && moodleDetail) {
+        // Check extraItems first
+        if (moodleDetail.extraItems) {
             for (const item of moodleDetail.extraItems) {
                 if (item.name.includes('EXAMEN_FINAL') && item.raw !== null) {
-                    moodleExt = item.raw;
+                    ext = item.raw;
                     break;
                 }
             }
         }
         // Also check categories for EXAMEN_FINAL
-        if (moodleExt === 0 && moodleDetail && moodleDetail.categories) {
+        if (ext === 0 && moodleDetail.categories) {
             for (const cat of moodleDetail.categories) {
                 for (const item of cat.items) {
                     if (item.name.includes('EXAMEN_FINAL') && item.raw !== null) {
-                        moodleExt = item.raw;
+                        ext = item.raw;
                         break;
                     }
                 }
-                if (moodleExt > 0) break;
+                if (ext > 0) break;
             }
         }
-        if (moodleExt > 0) {
-            const p1 = sgaDetail.p1 || 0;
-            const p2 = sgaDetail.p2 || 0;
-            const re = sgaDetail.re || 0;
-            const base = p1 + p2 + moodleExt;
-            correctedTotal = re > 0 ? Math.ceil((base + re) / 2) : Math.round(base);
+    }
+
+    // Use Moodle RECUPERACION when SGA RE is 0
+    if (re === 0 && moodleDetail && moodleDetail.extraItems) {
+        for (const item of moodleDetail.extraItems) {
+            if (item.name.includes('RECUPERACION') && item.raw !== null && item.raw > 0) {
+                re = item.raw;
+                break;
+            }
         }
     }
-    if (correctedTotal === null && sgaDetail.p1 !== null && sgaDetail.p2 !== null) {
-        const base = (sgaDetail.p1 || 0) + (sgaDetail.p2 || 0) + (sgaDetail.ext || 0);
-        correctedTotal = (sgaDetail.re || 0) > 0 ? Math.ceil((base + (sgaDetail.re || 0)) / 2) : Math.round(base);
-    }
+
+    // Always calculate from components
+    const base = p1 + p2 + ext;
+    const correctedTotal = re > 0
+        ? Math.ceil((base + re) / 2)
+        : Math.round(base);
 
     res.json({ sga: sgaDetail, moodle: moodleDetail, correctedTotal });
 });
