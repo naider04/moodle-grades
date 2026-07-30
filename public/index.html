@@ -1,91 +1,34 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Grade Insight — Análisis de Calificaciones</title>
-    <link rel="stylesheet" href="style.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grade Viewer</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="app">
-
-        <!-- Screen 1: Mode Selection -->
-        <div id="screen-mode" class="screen active">
-            <div class="center-card">
-                <div class="brand">
-                    <span class="brand-icon">&sum;</span>
-                    <h1>Grade Insight</h1>
-                    <p class="brand-sub">An&aacute;lisis de calificaciones UNEMI</p>
-                </div>
-                <p class="mode-prompt">Selecciona tu modalidad</p>
-                <div class="mode-options">
-                    <button class="mode-btn" data-mode="presencial">
-                        <span class="mode-icon">&#x1F3DB;</span>
-                        <span class="mode-title">Estudiante presencial</span>
-                        <span class="mode-desc">Acceder al aula presencial</span>
-                    </button>
-                    <button class="mode-btn" data-mode="enlinea">
-                        <span class="mode-icon">&#x1F310;</span>
-                        <span class="mode-title">Estudiante en l&iacute;nea</span>
-                        <span class="mode-desc">Acceder al aula virtual</span>
-                    </button>
-                    <button class="mode-btn" data-mode="otra">
-                        <span class="mode-icon">&#x2699;</span>
-                        <span class="mode-title">Otra instituci&oacute;n</span>
-                        <span class="mode-desc">Ingresar URL personalizada</span>
-                    </button>
-                </div>
+    <div class="container">
+        <h1>Mis Calificaciones</h1>
+        <div class="mode-selection">
+            <button class="mode-btn" data-mode="presencial">Estudiante Presencial</button>
+            <button class="mode-btn" data-mode="enlinea">Estudiante en Línea</button>
+            <button class="mode-btn" data-mode="otra">Otra</button>
+        </div>
+        <div class="login-form" style="display: none;">
+            <input type="text" id="username" placeholder="Usuario">
+            <input type="password" id="password" placeholder="Contraseña">
+            <button id="login-btn">Iniciar Sesión</button>
+        </div>
+        <div class="grades-container" style="display: none;">
+            <div class="grades-header">
+                <h2 id="career-name"></h2>
+                <h3 id="student-name"></h3>
+            </div>
+            <div class="grades-table">
+                <!-- Grades will be inserted here -->
             </div>
         </div>
-
-        <!-- Screen 2: Login -->
-        <div id="screen-login" class="screen">
-            <div class="center-card login-card">
-                <button id="login-back-btn" class="btn-text" aria-label="Volver">&larr; Volver</button>
-                <div class="brand small">
-                    <h2>Grade Insight</h2>
-                </div>
-                <p id="login-mode-label" class="login-mode-label"></p>
-                <form id="login-form">
-                    <div class="field hidden" id="field-moodle-url">
-                        <label for="moodle-url-input">URL del aula</label>
-                        <input type="url" id="moodle-url-input" placeholder="https://moodle.institucion.edu.ec" autocomplete="url" />
-                    </div>
-                    <div class="field">
-                        <label for="username">Usuario</label>
-                        <input type="text" id="username" placeholder="tu_usuario" required autocomplete="username" />
-                    </div>
-                    <div class="field">
-                        <label for="password">Contrase&ntilde;a</label>
-                        <input type="password" id="password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" required autocomplete="current-password" />
-                    </div>
-                    <button type="submit" id="login-btn" class="btn-primary">Ingresar</button>
-                    <div id="login-error" class="error-msg hidden"></div>
-                </form>
-            </div>
-        </div>
-
-        <!-- Screen 3: Dashboard -->
-        <div id="screen-dashboard" class="screen">
-            <header class="dash-header">
-                <div class="header-left">
-                    <h2>Mis Calificaciones</h2>
-                    <span id="header-user" class="header-user"></span>
-                    <span id="header-career" class="header-career"></span>
-                </div>
-                <button id="logout-btn" class="btn-text">Cerrar sesi&oacute;n</button>
-            </header>
-
-            <div id="loading-overlay" class="loading-overlay hidden">
-                <div class="spinner"></div>
-                <p>Cargando calificaciones&hellip;</p>
-            </div>
-
-            <div id="course-list" class="course-list"></div>
-        </div>
-
     </div>
-
     <script src="app.js"></script>
 </body>
 </html>
