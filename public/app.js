@@ -138,8 +138,11 @@ loginForm.addEventListener('submit', async (e) => {
             state.moodle = data.moodle || null;
             state.fullname = data.fullname;
             state.careerName = data.careerName || MODE_LABELS[state.mode];
+            
+            // Use detected mode from SGA for display
+            const modeLabel = data.detectedMode ? MODE_LABELS[data.detectedMode] : (MODE_LABELS[state.mode] || '');
             headerUser.textContent = data.fullname;
-            headerCareer.textContent = state.careerName;
+            headerCareer.textContent = state.careerName + (modeLabel ? ' · ' + modeLabel : '');
             showScreen(screenDash);
             await loadSgaCourses(data.sgaToken);
         }

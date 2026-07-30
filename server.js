@@ -97,8 +97,9 @@ app.post('/api/login-full', async (req, res) => {
         const inscripcion = (jwtPayload && jwtPayload.inscripcion) || {};
         const perfiles = (jwtPayload && jwtPayload.perfiles) || [];
 
-        // 2. Get career name from SGA
+        // 2. Get career name from SGA and extract modality
         let careerName = '';
+        let detectedMode = ''; // 'presencial' | 'enlinea' | ''
         try {
             const materiasRes = await fetch(`${SGA_API_BASE}/alumno/materias`, {
                 method: 'GET',
@@ -113,17 +114,31 @@ app.post('/api/login-full', async (req, res) => {
                 if (materiasData.isSuccess && materiasData.data) {
                     const malla = materiasData.data.eMalla;
                     if (malla && malla.display) {
-                        careerName = cleanCareerName(malla.display);
+                        const rawDisplay = malla.display;
+                        careerName = cleanCareerName(rawDisplay);
+                        // Detect modality from raw display
+                        if (/EN MODALIDAD EN LÍNEA/i.test(rawDisplay)) {
+                            detectedMode = 'enlinea';
+                        } else if (/EN MODALIDAD PRESENCIAL/i.test(rawDisplay)) {
+                            detectedMode = 'presencial';
+                        } else if (/EN LÍNEA|VIRTUAL/i.test(rawDisplay)) {
+                            detectedMode = 'enlinea';
+                        } else if (/PRESENCIAL/i.test(rawDisplay)) {
+                            detectedMode = 'presencial';
+                        }
                     }
                 }
             }
         } catch (e) { /* optional */ }
 
-        // 3. Moodle Login (for UNEMI modes)
+        // 3. Moodle Login — use detected mode from SGA if available, else fall back to user's choice
+        const effectiveMode = detectedMode || (mode && MOODLE_URLS[mode] ? mode : '');
         let moodleData = null;
-        if (mode && MOODLE_URLS[mode]) {
+        let actualMode = mode || detectedMode || '';
+        if (effectiveMode && MOODLE_URLS[effectiveMode]) {
             try {
-                moodleData = await moodleLogin(MOODLE_URLS[mode], username, password);
+                moodleData = await moodleLogin(MOODLE_URLS[effectiveMode], username, password);
+                actualMode = effectiveMode;
             } catch (e) { /* moodle is optional */ }
         }
 
@@ -136,6 +151,8 @@ app.post('/api/login-full', async (req, res) => {
             inscripcion,
             perfiles,
             moodle: moodleData,
+            detectedMode,  // what SGA says
+            actualMode,    // what was actually used for Moodle login
         });
     } catch (err) {
         res.status(500).json({ error: `Error de conexión: ${err.message}` });
